@@ -1,0 +1,23 @@
+{
+  "name": "yt-api",
+  "version": "1.0.0",
+  "description": "YouTube Audio Streaming API — no API keys, no headless browser. Uses YouTube's InnerTube API directly.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "youtube",
+    "audio",
+    "streaming",
+    "innertube",
+    "music"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^4.22.2"
+  }
+}

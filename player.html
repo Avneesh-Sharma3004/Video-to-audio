@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎵 YT Music Player</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #eee; min-height: 100vh; }
+  
+  .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+  
+  .search-box {
+    display: flex; gap: 8px; margin-bottom: 24px;
+    position: sticky; top: 0; background: #0a0a0a; padding: 16px 0; z-index: 10;
+  }
+  .search-box input {
+    flex: 1; padding: 12px 16px; border-radius: 24px;
+    border: 1px solid #333; background: #1a1a1a; color: #eee; font-size: 15px;
+    outline: none; transition: border-color .2s;
+  }
+  .search-box input:focus { border-color: #ff4444; }
+  .search-box button {
+    padding: 12px 20px; border-radius: 24px; border: none;
+    background: #ff4444; color: #fff; font-weight: 600; cursor: pointer;
+    transition: opacity .2s;
+  }
+  .search-box button:hover { opacity: 0.85; }
+  .search-box button:disabled { opacity: 0.4; cursor: default; }
+
+  .track {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px; border-radius: 12px; cursor: pointer;
+    transition: background .15s; margin-bottom: 4px;
+  }
+  .track:hover { background: #1a1a1a; }
+  .track.playing { background: #1a1a1a; border: 1px solid #ff4444; }
+  
+  .track-thumb { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: #222; }
+  
+  .track-info { flex: 1; min-width: 0; }
+  .track-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track-artist { font-size: 12px; color: #999; margin-top: 2px; }
+  .track-duration { font-size: 12px; color: #666; flex-shrink: 0; }
+
+  .now-playing {
+    position: sticky; bottom: 0; background: #111;
+    border-top: 1px solid #222; padding: 16px 20px;
+    display: none; align-items: center; gap: 12px;
+  }
+  .now-playing.active { display: flex; }
+  
+  .np-thumb { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; background: #222; flex-shrink: 0; }
+  
+  .np-info { flex: 1; min-width: 0; }
+  .np-title { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-artist { font-size: 13px; color: #999; margin-top: 2px; }
+  
+  .np-controls { display: flex; align-items: center; gap: 16px; }
+  .np-btn {
+    width: 40px; height: 40px; border: none; border-radius: 50%;
+    background: #ff4444; color: #fff; font-size: 18px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .np-btn:hover { opacity: 0.8; }
+  .np-btn.play-pause { width: 48px; height: 48px; font-size: 20px; }
+
+  .quality-select {
+    display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .quality-select button {
+    padding: 6px 12px; border-radius: 16px; border: 1px solid #333;
+    background: transparent; color: #999; font-size: 12px; cursor: pointer;
+    transition: all .15s;
+  }
+  .quality-select button.active {
+    background: #ff4444; border-color: #ff4444; color: #fff;
+  }
+
+  .status { text-align: center; color: #555; padding: 40px 0; }
+  .status.error { color: #ff4444; }
+
+  .spinner {
+    display: inline-block; width: 20px; height: 20px; border: 2px solid #333;
+    border-top-color: #ff4444; border-radius: 50%; animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="search-box">
+    <input type="text" id="searchInput" placeholder="Search for music..." autofocus>
+    <button id="searchBtn" onclick="doSearch()">Search</button>
+  </div>
+
+  <div class="quality-select">
+    <button class="active" data-itag="140">AAC 128k</button>
+    <button data-itag="251">Opus 160k</button>
+    <button data-itag="250">Opus 70k</button>
+  </div>
+
+  <div id="results"></div>
+</div>
+
+<div class="now-playing" id="nowPlaying">
+  <img class="np-thumb" id="npThumb" src="" alt="">
+  <div class="np-info">
+    <div class="np-title" id="npTitle">Nothing playing</div>
+    <div class="np-artist" id="npArtist"></div>
+  </div>
+  <div class="np-controls">
+    <button class="np-btn play-pause" id="playPauseBtn" onclick="togglePlay()">▶️</button>
+  </div>
+</div>
+
+<audio id="audio" preload="none"></audio>
+
+<script>
+const API = 'http://localhost:3000';
+let currentTrack = null;
+let currentItag = 140;
+
+// Quality selector
+document.querySelectorAll('.quality-select button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.quality-select button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentItag = parseInt(btn.dataset.itag);
+    if (currentTrack) playTrack(currentTrack);
+  });
+});
+
+// Search on Enter
+document.getElementById('searchInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+
+async function doSearch() {
+  const q = document.getElementById('searchInput').value.trim();
+  if (!q) return;
+
+  const results = document.getElementById('results');
+  results.innerHTML = '<div class="status"><div class="spinner"></div></div>';
+
+  try {
+    const res = await fetch(`${API}/api/search?q=${encodeURIComponent(q)}&limit=15&type=music`);
+    const data = await res.json();
+    
+    if (!data.results?.length) {
+      results.innerHTML = '<div class="status">No results found</div>';
+      return;
+    }
+
+    results.innerHTML = data.results.map((r, i) => `
+      <div class="track" onclick="playTrackById('${r.videoId}', '${escapeHtml(r.title)}', '${escapeHtml(r.author)}', '${r.thumbnails?.[r.thumbnails.length-1]?.url || ''}')">
+        <img class="track-thumb" src="${r.thumbnails?.[r.thumbnails.length-1]?.url || ''}" 
+             onerror="this.style.display='none'" loading="lazy">
+        <div class="track-info">
+          <div class="track-title">${escapeHtml(r.title)}</div>
+          <div class="track-artist">${escapeHtml(r.author)}</div>
+        </div>
+        <div class="track-duration">${r.lengthText || ''}</div>
+      </div>
+    `).join('');
+  } catch (err) {
+    results.innerHTML = `<div class="status error">Error: ${err.message}</div>`;
+  }
+}
+
+function playTrackById(videoId, title, artist, thumbnail) {
+  playTrack({ videoId, title, artist, thumbnail });
+}
+
+function playTrack(track) {
+  currentTrack = track;
+  const audio = document.getElementById('audio');
+  const np = document.getElementById('nowPlaying');
+
+  // Stop current playback
+  audio.pause();
+  audio.src = '';
+
+  // Set source
+  audio.src = `${API}/api/stream/${track.videoId}/${currentItag}`;
+  audio.play().catch(e => console.warn('Playback failed:', e));
+
+  // Update UI
+  document.querySelectorAll('.track').forEach(el => el.classList.remove('playing'));
+  document.querySelectorAll('.track').forEach(el => {
+    if (el.querySelector('.track-title')?.textContent === track.title) {
+      el.classList.add('playing');
+    }
+  });
+
+  np.classList.add('active');
+  document.getElementById('npThumb').src = track.thumbnail || '';
+  document.getElementById('npTitle').textContent = track.title;
+  document.getElementById('npArtist').textContent = track.artist;
+  document.getElementById('playPauseBtn').textContent = '⏸️';
+}
+
+function togglePlay() {
+  const audio = document.getElementById('audio');
+  if (audio.paused) {
+    audio.play();
+    document.getElementById('playPauseBtn').textContent = '⏸️';
+  } else {
+    audio.pause();
+    document.getElementById('playPauseBtn').textContent = '▶️';
+  }
+}
+
+// Audio events
+document.getElementById('audio').addEventListener('ended', () => {
+  document.getElementById('playPauseBtn').textContent = '▶️';
+});
+
+document.getElementById('audio').addEventListener('play', () => {
+  document.getElementById('playPauseBtn').textContent = '⏸️';
+});
+
+document.getElementById('audio').addEventListener('pause', () => {
+  document.getElementById('playPauseBtn').textContent = '▶️';
+});
+
+function escapeHtml(str) {
+  return str?.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;') || '';
+}
+</script>
+
+</body>
+</html>

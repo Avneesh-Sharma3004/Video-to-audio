@@ -97,6 +97,26 @@ function logError(message, error, data = {}) {
 const YTDLP_PATH = process.env.YTDLP_PATH || "yt-dlp";
 const YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || "";
 
+const fs = require("fs");
+const path = require("path");
+
+const RUNTIME_COOKIES_PATH =
+  process.env.RUNTIME_COOKIES_PATH || "/tmp/youtube-cookies.txt";
+
+function prepareCookiesFile() {
+  if (!YTDLP_COOKIES_PATH) {
+    return null;
+  }
+
+  if (!fs.existsSync(YTDLP_COOKIES_PATH)) {
+    throw new Error(`Cookie file not found: ${YTDLP_COOKIES_PATH}`);
+  }
+
+  fs.copyFileSync(YTDLP_COOKIES_PATH, RUNTIME_COOKIES_PATH);
+
+  return RUNTIME_COOKIES_PATH;
+}
+
 /**
  * yt-dlp process timeout.
  *
@@ -508,13 +528,15 @@ function resolveAudioUrl(videoId, itag) {
      */
     const format = itag ? `${itag}` : "bestaudio[ext=m4a]/bestaudio/best";
 
+    const cookiesPath = prepareCookiesFile();
+
     const args = [
       "--no-playlist",
       "--no-warnings",
       "--quiet",
       "--no-check-certificates",
 
-      ...(YTDLP_COOKIES_PATH ? ["--cookies", YTDLP_COOKIES_PATH] : []),
+      ...(cookiesPath ? ["--cookies", cookiesPath] : []),
 
       "--get-url",
 
@@ -523,7 +545,6 @@ function resolveAudioUrl(videoId, itag) {
 
       youtubeUrl,
     ];
-
     console.log("[YT-DLP] Resolving stream");
 
     console.log("[YT-DLP] video:", videoId);

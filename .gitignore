@@ -1,1 +1,16 @@
 node_modules/
+
+.env
+.env.*
+!.env.example
+
+yt-secrets/
+youtube-cookies.txt
+*.cookies
+
+*.webm
+*.m4a
+*.mp3
+*.mp4
+
+npm-debug.log*

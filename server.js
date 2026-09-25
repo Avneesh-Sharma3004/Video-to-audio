@@ -95,6 +95,7 @@ function logError(message, error, data = {}) {
  *   YTDLP_PATH=C:\yt-dlp\yt-dlp.exe
  */
 const YTDLP_PATH = process.env.YTDLP_PATH || "yt-dlp";
+const YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || "";
 
 /**
  * yt-dlp process timeout.
@@ -510,11 +511,16 @@ function resolveAudioUrl(videoId, itag) {
     const args = [
       "--no-playlist",
       "--no-warnings",
+      "--quiet",
+      "--no-check-certificates",
+
+      ...(YTDLP_COOKIES_PATH ? ["--cookies", YTDLP_COOKIES_PATH] : []),
+
       "--get-url",
-      "--extractor-args",
-      "youtube:player_client=android",
+
       "--format",
-      String(itag),
+      format,
+
       youtubeUrl,
     ];
 

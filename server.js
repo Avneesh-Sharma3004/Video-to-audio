@@ -343,16 +343,33 @@ app.get("/api/video/:id", async (req, res) => {
 });
 
 /** GET /api/stream/:id[/:itag] — stream audio */
-app.get("/api/stream/:id/:itag?", async (req, res) => {
-  const videoId = extractVideoId(req.params.id) || req.params.id;
+app.get("/api/stream/:id/:itag", async (req, res) => {
+  console.log("🔥 STREAM ROUTE HIT");
+  console.log("Video ID:", req.params.videoId);
+  console.log("ITAG:", req.params.itag);
+  console.log("Range:", req.headers.range);
 
-  const itag = req.params.itag ? parseInt(req.params.itag) : null;
+  try {
+    await streamViaInnerTube(
+      req.params.videoId,
+      Number(req.params.itag),
+      req,
+      res,
+    );
 
-  console.log(
-    `\n🎧 Stream request: ${videoId}${itag ? ` (itag=${itag})` : ""}`,
-  );
+    console.log("✅ streamViaInnerTube finished");
+  } catch (error) {
+    console.error("🔥🔥 STREAM ROUTE ERROR 🔥🔥");
+    console.error(error);
+    console.error(error.stack);
 
-  await streamViaInnerTube(res, videoId, itag);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
 });
 
 /** GET /api/health */
@@ -451,6 +468,18 @@ vlc "http://localhost:${PORT}/api/stream/dQw4w9WgXcQ/251"</pre>
 // ──────────────────────────────────────────────
 // Start
 // ──────────────────────────────────────────────
+
+process.on("uncaughtException", (error) => {
+  console.error("🔥 UNCAUGHT EXCEPTION");
+  console.error(error);
+  console.error(error.stack);
+});
+
+process.on("unhandledRejection", (error) => {
+  console.error("🔥 UNHANDLED REJECTION");
+  console.error(error);
+  console.error(error.stack);
+});
 app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════╗

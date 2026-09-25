@@ -16,6 +16,7 @@
  */
 
 const path = require("path");
+const https = require("https");
 const express = require("express");
 const { spawn } = require("child_process");
 const {
@@ -23,6 +24,7 @@ const {
   search,
   searchMusic,
   extractVideoId,
+  getAudioStream,
   AUDIO_ITAGS_BY_PREFERENCE,
 } = require("./lib/innerTube");
 
@@ -215,6 +217,96 @@ async function streamFallback(res, videoIdOrUrl, itag) {
   }
 }
 
+async function streamViaInnerTube(res, videoId, itag) {
+  try {
+    console.log(
+      `🎵 InnerTube stream request: ${videoId} (itag=${itag || "best"})`,
+    );
+
+    const audio = await getAudioStream(videoId, itag);
+
+    if (!audio || !audio.url) {
+      return res.status(404).json({
+        success: false,
+        message: "No direct audio stream available",
+      });
+    }
+
+    console.log("🎧 Direct audio URL found");
+    console.log("Mime:", audio.mimeType);
+    console.log("Bitrate:", audio.bitrate);
+
+    const streamUrl = new URL(audio.url);
+
+    const request = https.request(
+      {
+        hostname: streamUrl.hostname,
+        port: 443,
+        path: streamUrl.pathname + streamUrl.search,
+        method: "GET",
+        headers: {
+          "User-Agent":
+            "com.google.android.youtube/20.10.38 (Linux; U; Android 13; US) gzip",
+          Accept: "*/*",
+        },
+      },
+      (youtubeRes) => {
+        console.log(
+          "GoogleVideo response:",
+          youtubeRes.statusCode,
+          youtubeRes.headers["content-type"],
+        );
+
+        if (youtubeRes.statusCode !== 200) {
+          return res.status(502).json({
+            success: false,
+            message: `Audio source returned ${youtubeRes.statusCode}`,
+          });
+        }
+
+        res.statusCode = 200;
+
+        res.setHeader(
+          "Content-Type",
+          audio.mimeType?.split(";")[0] || "audio/mp4",
+        );
+
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("X-Stream-Backend", "innertube");
+
+        if (youtubeRes.headers["content-length"]) {
+          res.setHeader("Content-Length", youtubeRes.headers["content-length"]);
+        }
+
+        youtubeRes.pipe(res);
+      },
+    );
+
+    request.on("error", (error) => {
+      console.error("InnerTube stream error:", error.message);
+
+      if (!res.headersSent) {
+        res.status(502).json({
+          success: false,
+          message: "Failed to connect to audio source",
+        });
+      }
+    });
+
+    request.end();
+  } catch (error) {
+    console.error("InnerTube stream failed:", error);
+
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: error.message || "Audio streaming failed",
+      });
+    }
+  }
+}
+
 // ──────────────────────────────────────────────
 // ROUTES
 // ──────────────────────────────────────────────
@@ -253,12 +345,14 @@ app.get("/api/video/:id", async (req, res) => {
 /** GET /api/stream/:id[/:itag] — stream audio */
 app.get("/api/stream/:id/:itag?", async (req, res) => {
   const videoId = extractVideoId(req.params.id) || req.params.id;
+
   const itag = req.params.itag ? parseInt(req.params.itag) : null;
 
   console.log(
     `\n🎧 Stream request: ${videoId}${itag ? ` (itag=${itag})` : ""}`,
   );
-  streamViaYtdlp(res, videoId, itag);
+
+  await streamViaInnerTube(res, videoId, itag);
 });
 
 /** GET /api/health */

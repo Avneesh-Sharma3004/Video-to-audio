@@ -19,6 +19,7 @@ const path = require("path");
 const https = require("https");
 const express = require("express");
 const { spawn } = require("child_process");
+const YTDLP_PATH = process.env.YTDLP_PATH || "yt-dlp";
 const {
   getVideoInfo,
   search,
@@ -49,7 +50,10 @@ app.use((req, res, next) => {
 // ──────────────────────────────────────────────
 function checkYtdlp() {
   return new Promise((resolve) => {
-    const proc = spawn("yt-dlp", ["--version"], { timeout: 5000 });
+    const proc = spawn(YTDLP_PATH, ["--version"], {
+      timeout: 5000,
+    });
+
     proc.on("close", (code) => resolve(code === 0));
     proc.on("error", () => resolve(false));
   });
@@ -81,7 +85,7 @@ function streamViaYtdlp(res, videoIdOrUrl, itag) {
   console.log("Starting yt-dlp:");
   console.log("yt-dlp", args.join(" "));
 
-  const ytProc = spawn("yt-dlp", args, {
+  const ytProc = spawn(YTDLP_PATH, args, {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -217,96 +221,6 @@ async function streamFallback(res, videoIdOrUrl, itag) {
   }
 }
 
-async function streamViaInnerTube(res, videoId, itag) {
-  try {
-    console.log(
-      `🎵 InnerTube stream request: ${videoId} (itag=${itag || "best"})`,
-    );
-
-    const audio = await getAudioStream(videoId, itag);
-
-    if (!audio || !audio.url) {
-      return res.status(404).json({
-        success: false,
-        message: "No direct audio stream available",
-      });
-    }
-
-    console.log("🎧 Direct audio URL found");
-    console.log("Mime:", audio.mimeType);
-    console.log("Bitrate:", audio.bitrate);
-
-    const streamUrl = new URL(audio.url);
-
-    const request = https.request(
-      {
-        hostname: streamUrl.hostname,
-        port: 443,
-        path: streamUrl.pathname + streamUrl.search,
-        method: "GET",
-        headers: {
-          "User-Agent":
-            "com.google.android.youtube/20.10.38 (Linux; U; Android 13; US) gzip",
-          Accept: "*/*",
-        },
-      },
-      (youtubeRes) => {
-        console.log(
-          "GoogleVideo response:",
-          youtubeRes.statusCode,
-          youtubeRes.headers["content-type"],
-        );
-
-        if (youtubeRes.statusCode !== 200) {
-          return res.status(502).json({
-            success: false,
-            message: `Audio source returned ${youtubeRes.statusCode}`,
-          });
-        }
-
-        res.statusCode = 200;
-
-        res.setHeader(
-          "Content-Type",
-          audio.mimeType?.split(";")[0] || "audio/mp4",
-        );
-
-        res.setHeader("Cache-Control", "no-cache");
-        res.setHeader("Accept-Ranges", "bytes");
-        res.setHeader("X-Stream-Backend", "innertube");
-
-        if (youtubeRes.headers["content-length"]) {
-          res.setHeader("Content-Length", youtubeRes.headers["content-length"]);
-        }
-
-        youtubeRes.pipe(res);
-      },
-    );
-
-    request.on("error", (error) => {
-      console.error("InnerTube stream error:", error.message);
-
-      if (!res.headersSent) {
-        res.status(502).json({
-          success: false,
-          message: "Failed to connect to audio source",
-        });
-      }
-    });
-
-    request.end();
-  } catch (error) {
-    console.error("InnerTube stream failed:", error);
-
-    if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        message: error.message || "Audio streaming failed",
-      });
-    }
-  }
-}
-
 // ──────────────────────────────────────────────
 // ROUTES
 // ──────────────────────────────────────────────
@@ -343,21 +257,38 @@ app.get("/api/video/:id", async (req, res) => {
 });
 
 /** GET /api/stream/:id[/:itag] — stream audio */
-app.get("/api/stream/:id/:itag", async (req, res) => {
+/**
+ * GET /api/stream/:id/:itag — stream audio
+ */
+app.get("/api/stream/:videoId/:itag", async (req, res) => {
   console.log("🔥 STREAM ROUTE HIT");
   console.log("Video ID:", req.params.videoId);
   console.log("ITAG:", req.params.itag);
   console.log("Range:", req.headers.range);
 
   try {
-    await streamViaInnerTube(
-      req.params.videoId,
-      Number(req.params.itag),
-      req,
-      res,
-    );
+    const videoId = req.params.videoId;
+    const itag = Number(req.params.itag);
 
-    console.log("✅ streamViaInnerTube finished");
+    if (!videoId) {
+      return res.status(400).json({
+        success: false,
+        message: "Video ID is required",
+      });
+    }
+
+    if (!itag || Number.isNaN(itag)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid itag is required",
+      });
+    }
+
+    console.log("🎵 Starting yt-dlp stream...");
+    console.log("Video ID:", videoId);
+    console.log("ITAG:", itag);
+
+    streamViaYtdlp(res, videoId, itag);
   } catch (error) {
     console.error("🔥🔥 STREAM ROUTE ERROR 🔥🔥");
     console.error(error);
@@ -480,14 +411,6 @@ process.on("unhandledRejection", (error) => {
   console.error(error);
   console.error(error.stack);
 });
-app.listen(PORT, () => {
-  console.log(`
-╔══════════════════════════════════════════════╗
-║   🎵 YouTube Audio Streaming API           ║
-║   No API keys. No browser. Just works.      ║
-║                                              ║
-║   Server: http://localhost:${PORT}              ║
-║   Health: http://localhost:${PORT}/api/health    ║
-╚══════════════════════════════════════════════╝
-  `);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
 });

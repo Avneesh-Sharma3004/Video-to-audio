@@ -509,18 +509,12 @@ function resolveAudioUrl(videoId, itag) {
 
     const args = [
       "--no-playlist",
-
       "--no-warnings",
-
-      "--quiet",
-
-      "--no-check-certificates",
-
       "--get-url",
-
+      "--extractor-args",
+      "youtube:player_client=android",
       "--format",
-      format,
-
+      String(itag),
       youtubeUrl,
     ];
 

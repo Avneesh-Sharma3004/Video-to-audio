@@ -1203,6 +1203,79 @@ app.get("/api/health/yt-dlp", async (req, res) => {
   });
 });
 
+app.get("/api/debug/yt-dlp", async (req, res) => {
+  const videoId = req.query.videoId || "vRjaGgDsWSo";
+  const itag = req.query.itag || "140";
+
+  const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+  const args = [
+    "--no-playlist",
+    "--no-warnings",
+    "--get-url",
+    "--format",
+    String(itag),
+    youtubeUrl,
+  ];
+
+  console.log("==========================================");
+  console.log("[DEBUG YT-DLP]");
+  console.log("Video:", videoId);
+  console.log("Itag:", itag);
+  console.log("Command:", YTDLP_PATH, args.join(" "));
+  console.log("==========================================");
+
+  const proc = spawn(YTDLP_PATH, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+    env: {
+      ...process.env,
+    },
+  });
+
+  let stdout = "";
+  let stderr = "";
+
+  proc.stdout.on("data", (data) => {
+    const text = data.toString();
+
+    stdout += text;
+
+    console.log("[DEBUG STDOUT]", text.trim());
+  });
+
+  proc.stderr.on("data", (data) => {
+    const text = data.toString();
+
+    stderr += text;
+
+    console.error("[DEBUG STDERR]", text.trim());
+  });
+
+  proc.on("error", (error) => {
+    console.error("[DEBUG PROCESS ERROR]", error);
+
+    res.status(500).json({
+      success: false,
+      stage: "spawn",
+      error: error.message,
+    });
+  });
+
+  proc.on("close", (code) => {
+    console.log("[DEBUG EXIT CODE]", code);
+
+    res.status(code === 0 ? 200 : 502).json({
+      success: code === 0,
+      videoId,
+      itag,
+      exitCode: code,
+      stdout: stdout.trim(),
+      stderr: stderr.trim(),
+    });
+  });
+});
+
 /* =========================================================
    API DOCS
 ========================================================= */

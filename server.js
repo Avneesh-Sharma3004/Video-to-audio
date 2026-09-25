@@ -117,6 +117,17 @@ function prepareCookiesFile() {
   return RUNTIME_COOKIES_PATH;
 }
 
+const cookiesPath = prepareCookiesFile();
+
+console.log("[COOKIE DEBUG] Runtime:", {
+  path: cookiesPath,
+  exists: cookiesPath ? fs.existsSync(cookiesPath) : false,
+  size:
+    cookiesPath && fs.existsSync(cookiesPath)
+      ? fs.statSync(cookiesPath).size
+      : 0,
+});
+
 /**
  * yt-dlp process timeout.
  *
@@ -514,6 +525,16 @@ function checkYtdlp() {
  *
  * This gives us much better Range / seek handling.
  */
+
+console.log("[COOKIE DEBUG]", {
+  configured: Boolean(YTDLP_COOKIES_PATH),
+  exists: YTDLP_COOKIES_PATH ? fs.existsSync(YTDLP_COOKIES_PATH) : false,
+  size:
+    YTDLP_COOKIES_PATH && fs.existsSync(YTDLP_COOKIES_PATH)
+      ? fs.statSync(YTDLP_COOKIES_PATH).size
+      : 0,
+});
+
 function resolveAudioUrl(videoId, itag) {
   return new Promise((resolve, reject) => {
     const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;

@@ -15,16 +15,16 @@
  *   GET  /api/health               - Health check
  */
 
-const path = require('path');
-const express = require('express');
-const { spawn } = require('child_process');
+const path = require("path");
+const express = require("express");
+const { spawn } = require("child_process");
 const {
   getVideoInfo,
   search,
   searchMusic,
   extractVideoId,
   AUDIO_ITAGS_BY_PREFERENCE,
-} = require('./lib/innerTube');
+} = require("./lib/innerTube");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,10 +35,10 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(__dirname));
 app.use(express.json());
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Range');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Range");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
 
@@ -47,9 +47,9 @@ app.use((req, res, next) => {
 // ──────────────────────────────────────────────
 function checkYtdlp() {
   return new Promise((resolve) => {
-    const proc = spawn('yt-dlp', ['--version'], { timeout: 5000 });
-    proc.on('close', (code) => resolve(code === 0));
-    proc.on('error', () => resolve(false));
+    const proc = spawn("yt-dlp", ["--version"], { timeout: 5000 });
+    proc.on("close", (code) => resolve(code === 0));
+    proc.on("error", () => resolve(false));
   });
 }
 
@@ -57,74 +57,116 @@ function checkYtdlp() {
 // Stream audio via yt-dlp
 // ──────────────────────────────────────────────
 function streamViaYtdlp(res, videoIdOrUrl, itag) {
-  // Check if yt-dlp is available
-  const proc = spawn('yt-dlp', ['--version'], { timeout: 3000 });
-  proc.on('error', () => {
-    if (!res.headersSent) {
-      return res.status(500).json({
-        error: 'yt-dlp not found. Install it: pip install yt-dlp',
-        hint: 'brew install yt-dlp  or  pip3 install yt-dlp',
-      });
-    }
-  });
-  proc.on('close', (code) => {
-    if (code !== 0) {
-      if (!res.headersSent) {
-        return res.status(500).json({ error: 'yt-dlp not available' });
-      }
-      return;
-    }
-
-    // yt-dlp is available, stream the audio
-    const ytUrl = videoIdOrUrl.includes('youtube.com') || videoIdOrUrl.includes('youtu.be')
+  const ytUrl =
+    videoIdOrUrl.includes("youtube.com") || videoIdOrUrl.includes("youtu.be")
       ? videoIdOrUrl
       : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
 
-    const args = [
-      '-f', itag ? String(itag) : '140/251/250/249/139/bestaudio',
-      '-o', '-',           // Output to stdout
-      '--no-playlist',
-      '--no-warnings',
-      '--quiet',
-      '--no-progress',
-      ytUrl,
-    ];
+  const format = itag ? String(itag) : "140";
 
-    console.log(`  📡 yt-dlp ${args.join(' ')}`);
+  const args = [
+    "--format",
+    format,
+    "--output",
+    "-",
+    "--no-playlist",
+    "--no-warnings",
+    "--no-progress",
+    "--quiet",
+    ytUrl,
+  ];
 
-    const ytProc = spawn('yt-dlp', args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 0,
-    });
+  console.log("Starting yt-dlp:");
+  console.log("yt-dlp", args.join(" "));
 
-    // Set appropriate content type header
-    const ext = itag === '251' || itag === '250' || itag === '249' ? 'audio/webm' : 'audio/mp4';
-    res.setHeader('Content-Type', ext);
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('X-Stream-Backend', 'yt-dlp');
+  const ytProc = spawn("yt-dlp", args, {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 
-    // Capture stderr silently
-    let stderr = '';
-    ytProc.stderr.on('data', (d) => {
-      stderr += d.toString();
-    });
+  res.status(200);
+  res.setHeader("Content-Type", "audio/mp4");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("X-Stream-Backend", "yt-dlp");
 
-    ytProc.stdout.pipe(res);
+  let totalBytes = 0;
+  let stderr = "";
 
-    ytProc.on('error', (err) => {
-      console.error('yt-dlp error:', err.message);
-      if (!res.headersSent) {
-        // Try fallback: direct InnerTube URL
-        streamFallback(res, videoIdOrUrl, itag);
+  // =========================
+  // AUDIO DATA
+  // =========================
+
+  ytProc.stdout.on("data", (chunk) => {
+    totalBytes += chunk.length;
+
+    console.log("Audio bytes:", totalBytes);
+
+    res.write(chunk);
+  });
+
+  // =========================
+  // YT-DLP ERROR
+  // =========================
+
+  ytProc.stderr.on("data", (data) => {
+    stderr += data.toString();
+
+    console.log("yt-dlp:", data.toString().trim());
+  });
+
+  // =========================
+  // STREAM END
+  // =========================
+
+  ytProc.stdout.on("end", () => {
+    console.log("yt-dlp finished.");
+    console.log("Total audio bytes:", totalBytes);
+
+    if (!res.writableEnded) {
+      res.end();
+    }
+  });
+
+  // =========================
+  // PROCESS ERROR
+  // =========================
+
+  ytProc.on("error", (error) => {
+    console.error("yt-dlp process error:", error);
+
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: "yt-dlp process failed",
+      });
+    } else {
+      res.end();
+    }
+  });
+
+  // =========================
+  // PROCESS CLOSE
+  // =========================
+
+  ytProc.on("close", (code) => {
+    console.log("yt-dlp exited with code:", code);
+
+    if (code !== 0) {
+      console.error("yt-dlp stderr:", stderr);
+
+      if (!res.writableEnded) {
+        res.end();
       }
-    });
+    }
+  });
 
-    ytProc.on('close', (code) => {
-      if (code !== 0 && !res.headersSent) {
-        console.error('yt-dlp stderr:', stderr.slice(0, 500));
-        streamFallback(res, videoIdOrUrl, itag);
-      }
-    });
+  // =========================
+  // CLIENT DISCONNECTED
+  // =========================
+
+  res.on("close", () => {
+    if (!ytProc.killed) {
+      ytProc.kill("SIGTERM");
+    }
   });
 }
 
@@ -133,32 +175,38 @@ function streamViaYtdlp(res, videoIdOrUrl, itag) {
 // ──────────────────────────────────────────────
 async function streamFallback(res, videoIdOrUrl, itag) {
   try {
-    const { getAudioStream } = require('./lib/innerTube');
+    const { getAudioStream } = require("./lib/innerTube");
     const videoId = extractVideoId(videoIdOrUrl) || videoIdOrUrl;
     const audio = await getAudioStream(videoId, itag || undefined);
     if (!audio || !audio.url) {
-      return res.status(500).json({ error: 'No stream URL available' });
+      return res.status(500).json({ error: "No stream URL available" });
     }
 
     console.log(`  📡 Fallback InnerTube stream: itag=${audio.itag || itag}`);
 
-    const https = require('https');
+    const https = require("https");
     const u = new URL(audio.url);
-    const fetchReq = https.request({
-      hostname: u.hostname,
-      port: 443,
-      path: u.pathname + u.search,
-      method: 'GET',
-      headers: {
-        'User-Agent': 'com.google.android.youtube/20.10.38',
+    const fetchReq = https.request(
+      {
+        hostname: u.hostname,
+        port: 443,
+        path: u.pathname + u.search,
+        method: "GET",
+        headers: {
+          "User-Agent": "com.google.android.youtube/20.10.38",
+        },
       },
-    }, (fetchRes) => {
-      res.setHeader('Content-Type', audio.mimeType?.split(';')[0] || 'audio/mp4');
-      res.setHeader('X-Stream-Backend', 'innertube-fallback');
-      fetchRes.pipe(res);
-    });
+      (fetchRes) => {
+        res.setHeader(
+          "Content-Type",
+          audio.mimeType?.split(";")[0] || "audio/mp4",
+        );
+        res.setHeader("X-Stream-Backend", "innertube-fallback");
+        fetchRes.pipe(res);
+      },
+    );
 
-    fetchReq.on('error', (err) => {
+    fetchReq.on("error", (err) => {
       if (!res.headersSent) res.status(502).json({ error: err.message });
     });
     fetchReq.end();
@@ -172,58 +220,62 @@ async function streamFallback(res, videoIdOrUrl, itag) {
 // ──────────────────────────────────────────────
 
 /** GET /api/search?q=<query>&limit=10&type=music */
-app.get('/api/search', async (req, res) => {
+app.get("/api/search", async (req, res) => {
   try {
     const { q, limit = 10, type } = req.query;
-    if (!q) return res.status(400).json({ error: 'Missing query parameter ?q=' });
+    if (!q)
+      return res.status(400).json({ error: "Missing query parameter ?q=" });
 
-    const results = type === 'music'
-      ? await searchMusic(q, parseInt(limit))
-      : await search(q, parseInt(limit));
+    const results =
+      type === "music"
+        ? await searchMusic(q, parseInt(limit))
+        : await search(q, parseInt(limit));
 
     res.json({ query: q, results });
   } catch (err) {
-    console.error('Search error:', err);
+    console.error("Search error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
 /** GET /api/video/:id — metadata + audio streams */
-app.get('/api/video/:id', async (req, res) => {
+app.get("/api/video/:id", async (req, res) => {
   try {
     const info = await getVideoInfo(req.params.id);
     const { playerResponse, ...cleanInfo } = info;
     res.json(cleanInfo);
   } catch (err) {
-    console.error('Video info error:', err);
+    console.error("Video info error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
 /** GET /api/stream/:id[/:itag] — stream audio */
-app.get('/api/stream/:id/:itag?', async (req, res) => {
+app.get("/api/stream/:id/:itag?", async (req, res) => {
   const videoId = extractVideoId(req.params.id) || req.params.id;
   const itag = req.params.itag ? parseInt(req.params.itag) : null;
 
-  console.log(`\n🎧 Stream request: ${videoId}${itag ? ` (itag=${itag})` : ''}`);
+  console.log(
+    `\n🎧 Stream request: ${videoId}${itag ? ` (itag=${itag})` : ""}`,
+  );
   streamViaYtdlp(res, videoId, itag);
 });
 
 /** GET /api/health */
-app.get('/api/health', async (req, res) => {
+app.get("/api/health", async (req, res) => {
   const hasYtdlp = await checkYtdlp();
   res.json({
-    status: 'ok',
-    service: 'YouTube Audio API',
-    version: '1.0.0',
+    status: "ok",
+    service: "YouTube Audio API",
+    version: "1.0.0",
     noApiKeyRequired: true,
-    engine: 'InnerTube + yt-dlp',
+    engine: "InnerTube + yt-dlp",
     ytdlpAvailable: hasYtdlp,
   });
 });
 
 /** GET / — docs */
-app.get('/', (req, res) => {
+app.get("/", (req, res) => {
   res.send(`
 <!DOCTYPE html>
 <html>
